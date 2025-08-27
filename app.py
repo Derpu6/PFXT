@@ -6,7 +6,7 @@ import re
 import ast
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import altair as alt
 import hashlib
 import difflib
 from datetime import datetime
@@ -22,11 +22,6 @@ RESULTS_DIR = "exam_results"  # 添加结果目录
 os.makedirs(CONFIG_DIR, exist_ok=True)
 os.makedirs(PLAGIARISM_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)  # 确保结果目录存在
-
-# 设置中文字体支持
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'KaiTi']
-plt.rcParams['axes.unicode_minus'] = False
-
 
 # --- 初始化Session State ---
 def init_session_state():
@@ -959,10 +954,14 @@ def save_results(student_id, student_name, config, scores, comments, ai_feedback
     return result_file
 
 
-# --- 学情反馈界面 ---
 def show_learning_feedback():
     """显示学情反馈界面"""
     st.header("📊 学情反馈")
+
+    # 检查是否已加载评分配置
+    if st.session_state.exam_config is None:
+        st.warning("请先加载或创建一个评分配置！")
+        return
 
     # 第一部分：整体表现
     st.subheader("班级整体表现")
@@ -979,6 +978,10 @@ def show_learning_feedback():
 
     # 获取所有评分名称
     exam_names = list(set([f.split('_')[2] for f in result_files if '_' in f]))
+    if not exam_names:
+        st.warning("没有找到任何评分名称")
+        return
+
     selected_exam = st.selectbox("选择评分", exam_names)
 
     # 加载该评分的所有结果
@@ -1013,20 +1016,24 @@ def show_learning_feedback():
 
     # 显示学生成绩柱状图
     st.write("学生成绩分布:")
-    fig, ax = plt.subplots(figsize=(10, 5))
-    bars = ax.bar(students, scores, color='skyblue')
+    chart_data = pd.DataFrame({'学生': students, '分数': scores})
 
-    # 添加分数标签
-    for bar in bars:
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width() / 2., height,
-                f'{height}', ha='center', va='bottom')
+    chart = alt.Chart(chart_data).mark_bar().encode(
+        x=alt.X('学生', sort=None),
+        y='分数',
+        color=alt.value('skyblue')
+    ).properties(width=600, height=300)
 
-    ax.set_xlabel("学生姓名")
-    ax.set_ylabel("分数")
-    ax.set_title(f"{selected_exam} - 学生成绩分布图")
-    plt.xticks(rotation=15)
-    st.pyplot(fig)
+    # 添加文本标签
+    text = chart.mark_text(
+        align='center',
+        baseline='bottom',
+        dy=-5  # 调整文本位置
+    ).encode(
+        text='分数'
+    )
+
+    st.altair_chart(chart + text)
 
     # 成绩分布分析
     st.subheader("成绩分布分析")
@@ -1103,25 +1110,34 @@ def show_learning_feedback():
 
     # 题目得分率可视化
     st.subheader("各题目得分率")
-    fig, ax = plt.subplots(figsize=(10, 6))
-    x = np.arange(len(topics))
-    ax.bar(x, avg_topic_scores, color=np.where(np.array(avg_topic_scores) >= 85, 'green',
-                                               np.where(np.array(avg_topic_scores) < 70, 'red', 'skyblue')))
+    topic_df = pd.DataFrame({'题目': topics, '平均得分率': avg_topic_scores})
+
+    # 创建柱状图 - 使用正确的条件颜色语法
+    chart = alt.Chart(topic_df).mark_bar().encode(
+        x=alt.X('题目', sort=None, axis=alt.Axis(labelAngle=45)),
+        y=alt.Y('平均得分率', scale=alt.Scale(domain=[0, 100])),
+        color=alt.Color('平均得分率:Q',
+                        scale=alt.Scale(
+                            domain=[0, 70, 85, 100],
+                            range=['red', 'skyblue', 'green', 'green']
+                        ),
+                        legend=None)
+    ).properties(width=600, height=400)
 
     # 添加参考线
-    ax.axhline(y=85, color='green', linestyle='--', alpha=0.5, label="强项阈值 (85%)")
-    ax.axhline(y=70, color='red', linestyle='--', alpha=0.5, label="弱项阈值 (70%)")
+    rule_85 = alt.Chart(pd.DataFrame({'y': [85]})).mark_rule(color='green', strokeDash=[5, 5]).encode(y='y')
+    rule_70 = alt.Chart(pd.DataFrame({'y': [70]})).mark_rule(color='red', strokeDash=[5, 5]).encode(y='y')
 
-    # 添加标签
-    for i, v in enumerate(avg_topic_scores):
-        ax.text(i, v + 1, f"{v:.1f}%", ha='center')
+    # 添加文本标签
+    text = chart.mark_text(
+        align='center',
+        baseline='bottom',
+        dy=-5
+    ).encode(
+        text=alt.Text('平均得分率:Q', format='.1f')
+    )
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(topics, rotation=45)
-    ax.set_ylabel("平均得分率 (%)")
-    ax.set_title("各题目得分率分析")
-    ax.legend()
-    st.pyplot(fig)
+    st.altair_chart(chart + rule_85 + rule_70 + text)
 
     # 第二部分：个人分数
     st.subheader("个人分数分析")
@@ -1232,12 +1248,21 @@ def show_plagiarism_report():
             # 可视化展示
             st.subheader("相似度分布")
             similarities = [pair['相似度'] for pair in report['high_similarity_pairs']]
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.hist(similarities, bins=10, color='salmon', edgecolor='black')
-            ax.set_xlabel("相似度 (%)")
-            ax.set_ylabel("配对数量")
-            ax.set_title("相似度分布直方图")
-            st.pyplot(fig)
+            # 创建数据框
+
+            sim_df = pd.DataFrame({'相似度': similarities})
+
+            # 创建直方图
+
+            chart = alt.Chart(sim_df).mark_bar(color='salmon').encode(
+
+                alt.X('相似度:Q', bin=alt.Bin(maxbins=10), title='相似度 (%)'),
+
+                alt.Y('count()', title='配对数量'),
+
+            ).properties(width=600, height=300)
+
+            st.altair_chart(chart)
         else:
             st.success("✅ 没有发现高相似度代码")
 
