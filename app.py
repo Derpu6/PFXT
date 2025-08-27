@@ -6,6 +6,8 @@ import re
 import ast
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import hashlib
 import difflib
@@ -1313,4 +1315,5 @@ if __name__ == "__main__":
         show_learning_feedback()
 
     elif app_mode == "抄袭情况":
+
         show_plagiarism_report()
