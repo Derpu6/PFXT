@@ -581,16 +581,49 @@ def create_exam_config_ui():
             st.markdown("**功能点**")
             subtasks = q.get('subtasks', [])
 
+            allocated_score = 0  # 重置已分配分数
+            subtasks = q.get('subtasks', [])
+
+            # 先计算当前已分配总分（支持动态调整）
+            for j, subtask in enumerate(subtasks):
+                current_score = st.session_state.exam_config['questions'][i]['subtasks'][j]['score']
+                allocated_score += current_score
+
+            # 配置每个功能点
             for j, subtask in enumerate(subtasks):
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    desc = st.text_input(f"功能点 {j + 1} 描述",
-                                         value=subtask['desc'],
-                                         key=f"q{i}_sub{j}_desc")
+                    desc = st.text_input(f"功能点 {j + 1} 描述", value=subtask['desc'], key=f"q{i}_sub{j}_desc")
                 with col2:
-                    score = st.number_input("分值", 1, total,
-                                            value=subtask['score'],
-                                            key=f"q{i}_sub{j}_score")
+                    # 修复：确保max_score不会为负数
+                    max_score_val = q['total'] - allocated_score + subtask['score']
+                    max_score = max(0, max_score_val)  # 确保最小为0
+
+                    # 计算安全的初始值
+                    if max_score > 0:
+                        initial_value = min(subtask['score'], max_score)
+                    else:
+                        initial_value = 0  # 当max_score为0时，初始值设为0
+
+                    score = st.number_input(
+                        "分值",
+                        0, max_score,  # min_value=0, max_value=max_score
+                        value=initial_value,
+                        key=f"q{i}_sub{j}_score"
+                    )
+
+                    # 更新已分配分数（需减去旧值再加新值）
+                    allocated_score = allocated_score - subtask['score'] + score
+                # 更新功能点信息
+                st.session_state.exam_config['questions'][i]['subtasks'][j]['desc'] = desc
+                st.session_state.exam_config['questions'][i]['subtasks'][j]['score'] = score
+
+                # 实时显示分配状态
+                st.caption(f"已分配: {allocated_score}/{q['total']} | 剩余: {q['total'] - allocated_score}")
+
+            # 循环结束后检查总分
+            if allocated_score > q['total']:
+                st.warning("⚠️ 功能点总分已超过题目设定！请调整分值")
 
                 # 更新功能点信息到session_state
                 st.session_state.exam_config['questions'][i]['subtasks'][j]['desc'] = desc
@@ -963,6 +996,10 @@ def show_learning_feedback():
         st.warning("请先加载或创建一个评分配置！")
         return
 
+    # 获取当前加载的考试名称
+    exam_name = st.session_state.exam_config['exam_name']
+    st.subheader(f"当前评分: {exam_name}")
+
     # 第一部分：整体表现
     st.subheader("班级整体表现")
 
@@ -976,25 +1013,17 @@ def show_learning_feedback():
         st.warning("没有找到任何评分结果文件")
         return
 
-    # 获取所有评分名称
-    exam_names = list(set([f.split('_')[2] for f in result_files if '_' in f]))
-    if not exam_names:
-        st.warning("没有找到任何评分名称")
-        return
-
-    selected_exam = st.selectbox("选择评分", exam_names)
-
     # 加载该评分的所有结果
     exam_results = []
     for file in result_files:
-        if selected_exam in file:
+        if exam_name in file:  # 直接使用当前配置的考试名称
             filepath = os.path.join(RESULTS_DIR, file)
             with open(filepath, 'r', encoding='utf-8') as f:
                 result = json.load(f)
                 exam_results.append(result)
 
     if not exam_results:
-        st.warning(f"没有找到'{selected_exam}'的评分结果")
+        st.warning(f"没有找到'{exam_name}'的评分结果")
         return
 
     # 提取学生成绩数据
@@ -1280,14 +1309,13 @@ def show_plagiarism_report():
     st.write("5. 增加面试环节验证学生理解程度")
 
 
-# --- 主程序入口 ---
 if __name__ == "__main__":
     # 初始化 session state
     init_session_state()
 
     # 创建侧边栏导航
     st.sidebar.title("导航")
-    app_mode = st.sidebar.selectbox("选择模式", ["评分界面", "创建评分配置", "加载评分配置", "学情反馈", "抄袭情况"])
+    app_mode = st.sidebar.selectbox("选择模式", ["评分界面", "创建评分配置", "学情反馈", "抄袭情况"])
 
     if app_mode == "创建评分配置":
         config = create_exam_config_ui()
@@ -1295,52 +1323,51 @@ if __name__ == "__main__":
             st.session_state.exam_config = config
             st.success("评分配置已创建并加载!")
 
-    elif app_mode == "加载评分配置":
-        config = load_exam_config_ui()
-        if config:
-            st.session_state.exam_config = config
-
     elif app_mode == "评分界面":
+        # 在评分界面顶部添加配置加载功能
+        st.header("📂 加载评分配置")
+
+        # 获取所有配置文件
+        config_files = [f for f in os.listdir(CONFIG_DIR) if f.endswith(".json")]
+
+        if config_files:
+            selected_file = st.selectbox("选择评分配置", config_files)
+            filepath = os.path.join(CONFIG_DIR, selected_file)
+
+            if st.button("加载配置"):
+                with open(filepath, "r", encoding='utf-8') as f:
+                    config = json.load(f)
+                    st.session_state.exam_config = config
+                    st.success(f"已加载配置: {config['exam_name']}")
+        else:
+            st.warning("没有找到评分配置文件")
+
+        # 显示评分界面
         if st.session_state.exam_config:
             scoring_interface(st.session_state.exam_config)
-        else:
-            st.warning("请先创建或加载评分配置")
-
-            # 提供默认配置
-            if st.button("使用默认配置"):
-                exam_config = {
-                    "exam_name": "嵌入式系统期中评分",
-                    "exam_date": "2023-11-15",
-                    "questions": [
-                        {
-                            "title": "LED闪烁控制",
-                            "description": "编写程序控制开发板上的LED灯以1Hz频率闪烁。",
-                            "total": 20,
-                            "subtasks": [
-                                {"desc": "正确配置GPIO引脚", "score": 5},
-                                {"desc": "实现1秒延时函数", "score": 5},
-                                {"desc": "主循环中控制LED亮灭", "score": 10}
-                            ],
-                            "code_criteria": ["代码结构清晰", "注释完整", "变量命名规范"]
-                        },
-                        {
-                            "title": "串口通信",
-                            "description": "配置串口，实现与PC端的字符串收发。",
-                            "total": 30,
-                            "subtasks": [
-                                {"desc": "正确初始化串口", "score": 10},
-                                {"desc": "接收并回显字符串", "score": 10},
-                                {"desc": "处理接收缓冲区溢出", "score": 10}
-                            ],
-                            "code_criteria": ["代码健壮性", "资源管理", "错误处理"]
-                        }
-                    ]
-                }
-                st.session_state.exam_config = exam_config
-                st.success("已加载默认配置!")
 
     elif app_mode == "学情反馈":
-        show_learning_feedback()
+        # 在学情反馈顶部添加配置加载功能
+        st.header("📂 加载评分配置")
+
+        # 获取所有配置文件
+        config_files = [f for f in os.listdir(CONFIG_DIR) if f.endswith(".json")]
+
+        if config_files:
+            selected_file = st.selectbox("选择评分配置", config_files)
+            filepath = os.path.join(CONFIG_DIR, selected_file)
+
+            if st.button("加载配置"):
+                with open(filepath, "r", encoding='utf-8') as f:
+                    config = json.load(f)
+                    st.session_state.exam_config = config
+                    st.success(f"已加载配置: {config['exam_name']}")
+        else:
+            st.warning("没有找到评分配置文件")
+
+        # 显示学情反馈
+        if st.session_state.exam_config:
+            show_learning_feedback()
 
     elif app_mode == "抄袭情况":
         show_plagiarism_report()
