@@ -449,11 +449,6 @@ def create_exam_config_ui():
     """创建评分配置界面"""
     st.header("📝 创建评分配置")
 
-    # API密钥设置
-    api_key = st.sidebar.text_input("AI API密钥", type="password",
-                                    value=st.session_state.get('api_key', ''))
-    st.session_state.api_key = api_key
-
     # 确保 exam_config 存在
     if 'exam_config' not in st.session_state or st.session_state.exam_config is None:
         st.session_state.exam_config = {
@@ -711,12 +706,6 @@ def scoring_interface(config):
     st.header(f"📝 评分 - {config['exam_name']}")
     st.caption(f"评分日期: {config['exam_date']}")
 
-    # 在侧边栏设置API密钥
-    api_key = st.sidebar.text_input("输入AI评分API密钥", type="password",
-                                    value=st.session_state.get('api_key', ''),
-                                    help="从阿里云DashScope平台获取")
-    st.session_state.api_key = api_key
-
     # 学生信息
     st.subheader("学生信息")
     col1, col2 = st.columns(2)
@@ -774,7 +763,8 @@ def scoring_interface(config):
             # AI辅助评分按钮
             if code_content and st.button(f"🤖 AI辅助评分 - {q['title']}", key=f"ai_{i}", use_container_width=True):
                 with st.spinner("AI评分中..."):
-                    feedback = ai_assistant_score(q, st.session_state.student_code, api_key)
+                    # 使用 st.session_state.api_key 而非局部变量
+                    feedback = ai_assistant_score(q, st.session_state.student_code, st.session_state.api_key)
                     st.session_state.ai_feedback[q['title']] = feedback
 
             # 显示AI反馈
@@ -1315,7 +1305,34 @@ if __name__ == "__main__":
 
     # 创建侧边栏导航
     st.sidebar.title("导航")
+
+    # 在侧边栏顶部添加AI API密钥输入框
+    st.sidebar.subheader("AI API密钥设置")
+    api_key = st.sidebar.text_input("输入AI API密钥", type="password",
+                                    value=st.session_state.get('api_key', ''),
+                                    help="从阿里云DashScope平台获取")
+    st.session_state.api_key = api_key
+
     app_mode = st.sidebar.selectbox("选择模式", ["评分界面", "创建评分配置", "学情反馈", "抄袭情况"])
+
+    # 在侧边栏添加加载评分配置功能（在API密钥下方）
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("加载评分配置")
+
+    # 获取所有配置文件
+    config_files = [f for f in os.listdir(CONFIG_DIR) if f.endswith(".json")]
+
+    if config_files:
+        selected_file = st.sidebar.selectbox("选择评分配置", config_files)
+        filepath = os.path.join(CONFIG_DIR, selected_file)
+
+        if st.sidebar.button("加载配置"):
+            with open(filepath, "r", encoding='utf-8') as f:
+                config = json.load(f)
+                st.session_state.exam_config = config
+                st.sidebar.success(f"已加载配置: {config['exam_name']}")
+    else:
+        st.sidebar.warning("没有找到评分配置文件")
 
     if app_mode == "创建评分配置":
         config = create_exam_config_ui()
@@ -1324,50 +1341,18 @@ if __name__ == "__main__":
             st.success("评分配置已创建并加载!")
 
     elif app_mode == "评分界面":
-        # 在评分界面顶部添加配置加载功能
-        st.header("📂 加载评分配置")
-
-        # 获取所有配置文件
-        config_files = [f for f in os.listdir(CONFIG_DIR) if f.endswith(".json")]
-
-        if config_files:
-            selected_file = st.selectbox("选择评分配置", config_files)
-            filepath = os.path.join(CONFIG_DIR, selected_file)
-
-            if st.button("加载配置"):
-                with open(filepath, "r", encoding='utf-8') as f:
-                    config = json.load(f)
-                    st.session_state.exam_config = config
-                    st.success(f"已加载配置: {config['exam_name']}")
-        else:
-            st.warning("没有找到评分配置文件")
-
         # 显示评分界面
         if st.session_state.exam_config:
             scoring_interface(st.session_state.exam_config)
+        else:
+            st.warning("请先在侧边栏加载评分配置")
 
     elif app_mode == "学情反馈":
-        # 在学情反馈顶部添加配置加载功能
-        st.header("📂 加载评分配置")
-
-        # 获取所有配置文件
-        config_files = [f for f in os.listdir(CONFIG_DIR) if f.endswith(".json")]
-
-        if config_files:
-            selected_file = st.selectbox("选择评分配置", config_files)
-            filepath = os.path.join(CONFIG_DIR, selected_file)
-
-            if st.button("加载配置"):
-                with open(filepath, "r", encoding='utf-8') as f:
-                    config = json.load(f)
-                    st.session_state.exam_config = config
-                    st.success(f"已加载配置: {config['exam_name']}")
-        else:
-            st.warning("没有找到评分配置文件")
-
         # 显示学情反馈
         if st.session_state.exam_config:
             show_learning_feedback()
+        else:
+            st.warning("请先在侧边栏加载评分配置")
 
     elif app_mode == "抄袭情况":
         show_plagiarism_report()
