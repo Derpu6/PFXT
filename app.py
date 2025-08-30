@@ -1052,13 +1052,16 @@ def show_learning_feedback():
 
     for result in exam_results:
         for topic, score in result['scores'].items():
-            # 找到该题目的总分
-            for q in st.session_state.exam_config.get('questions', []):
-                if q['title'] == topic:
-                    total = q['total']
-                    break
+            if topic == "代码质量":  # 质量分特殊处理
+                # 获取质量分总分（如15分）
+                total = st.session_state.exam_config.get('code_total', 15)
+
             else:
-                total = 100  # 默认值
+            # 找到该题目的总分
+                for q in st.session_state.exam_config.get('questions', []):
+                    if q['title'] == topic:
+                        total = q['total']
+                        break
 
             # 计算得分率
             score_rate = (score / total) * 100
